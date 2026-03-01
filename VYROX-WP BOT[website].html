@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VYROX - Future Automation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    
+    <!-- Smooth Scroll (Lenis) -->
+    <script src="https://unpkg.com/@studio-freight/lenis@1.0.42/dist/lenis.min.js"></script> 
+
+    <!-- GSAP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    
+    <!-- Three.js Core -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Three.js Post-Processing -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+    <!-- FIREBASE INTEGRATION (YOUR CONFIG) -->
+     <script type="module">
+  // FIREBASE (CDN modular SDK) - single correct config & Firestore write helper
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getFirestore, collection, addDoc, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+
+  // <<< USE THE CONFIG FOR YOUR PROJECT (vyrox-wp-automation) >>>
+  const firebaseConfig = {
+    apiKey: "AIzaSyD6_lTDL-WwYp52qhm1ymJgN1gjLVFZFkY",
+    authDomain: "vyrox-wp-automation.firebaseapp.com",
+    projectId: "vyrox-wp-automation",
+    storageBucket: "vyrox-wp-automation.firebasestorage.app",
+    messagingSenderId: "339931694488",
+    appId: "1:339931694488:web:9394d47fedc772872017ed",
+    measurementId: "G-2X37RL8L45"
+  };
+
+  // initialize
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // Expose a safe helper to the page that your React code calls
+  window.saveLeadToFirebase = async (data = {}) => {
+    try {
+      if (!data || typeof data !== 'object') throw new Error("Invalid lead data");
+
+      // choose collection name (you already used 'contact_sales' vs other)
+      const collectionName = data.requestType === "contact_sales" ? "inquiries" : "leads";
+
+      const payload = {
+        ...data,
+        createdAt: serverTimestamp(),
+        source: window.location.hostname || 'unknown'
+      };
+
+      const docRef = await addDoc(collection(db, collectionName), payload);
+      console.log(`[Firebase] saved to "${collectionName}" id=${docRef.id}`, payload);
+      return { ok: true, id: docRef.id };
+    } catch (err) {
+      console.error("[Firebase] saveLeadToFirebase error:", err);
+      return { ok: false, error: err.message || err };
+    }
+  };// CREATE CLIENT + BOT + MENU AFTER CHECKOUT
+window.createClientInFirestore = async (payload) => {
+  try {
+    const col = collection(db, "clients");
+    const docRef = await addDoc(col, {
+      ...payload,
+      createdAt: new Date()
+    });
+
+    console.log("Client created id:", docRef.id);
+
+    // Create default MENU
+    const menusCol = collection(db, "menus");
+    const menuDoc = await addDoc(menusCol, {
+      clientId: docRef.id,
+      name: `${payload.companyName || 'Menu'} - Default`,
+      categories: [],
+      updatedAt: new Date()
+    });
+
+    // Create BOT placeholder
+    const botsCol = collection(db, "bots");
+    const botDoc = await addDoc(botsCol, {
+      clientId: docRef.id,
+      clientRef: `clients/${docRef.id}`,
+      botName: `${payload.companyName || 'Bot'}-Default`,
+      status: "provisioning",
+      createdAt: new Date()
+    });
+
+    // Update client with references
+    const clientRef = doc(db, "clients", docRef.id);
+    await setDoc(clientRef, {
+      menusRef: `menus/${menuDoc.id}`,
+      botRef: `bots/${botDoc.id}`
+    }, { merge: true });
+
+    return { clientId: docRef.id, menuId: menuDoc.id, botId: botDoc.id };
+
+  } catch (err) {
+    console.error("createClientInFirestore error", err);
+    throw err;
+  }
+};
+
+
+  // small runtime check: exposes a function to test from devtools
+  console.log("Firebase initialized for project:", firebaseConfig.projectId);
+  console.log("Call in console: await window.saveLeadToFirebase({name:'test', email:'a@b.c', phone:'123', requestType:'checkout_plan'})");
+</script>
+
+
+    <style>
+        html.lenis { height: auto; }
+        .lenis.lenis-smooth { scroll-behavior: auto; }
+        .lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+        .lenis.lenis-stopped { overflow: hidden; }
+        .lenis.lenis-scrolling iframe { pointer-events: none; }
+
+        body { 
+            margin: 0; 
+            background-color: #020202; 
+            overflow-x: hidden; 
+            color: white; 
+            cursor: none;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeSpeed; 
+        }
+        
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #020202; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #A855F7; }
+        
+        /* GPU acceleration */
+        .laser-flow-container { 
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; 
+            will-change: transform; 
+            transform: translateZ(0); 
+        }
+        .ghost-cursor-container { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; mix-blend-mode: screen; 
+            will-change: transform;
+            transform: translateZ(0);
+        }
+        .scroll-float { overflow: hidden; }
+        .scroll-float-text { display: inline-block; font-size: 10vw; font-weight: 900; text-align: center; line-height: 1; color: white; mix-blend-mode: screen; }
+        .char { display: inline-block; }
+        
+        /* Softer Glows */
+        .glow-visible { box-shadow: 0 0 25px rgba(168, 85, 247, 0.1); border-color: rgba(168, 85, 247, 0.2); }
+        .plan-card-glow { 
+            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); 
+            will-change: transform, box-shadow; 
+            transform: translateZ(0);
+        }
+        .plan-card-glow:hover { 
+            box-shadow: 0 0 40px rgba(168, 85, 247, 0.08); 
+            border-color: rgba(168, 85, 247, 0.3); 
+            transform: translateY(-8px) scale(1.01) translateZ(0); 
+            z-index: 10; 
+        }
+        
+        #loader { position: fixed; inset: 0; background: #000; z-index: 10000; display: flex; justify-content: center; items-center; transition: opacity 0.5s ease; }
+        .spinner { width: 40px; height: 40px; border: 2px solid rgba(168,85,247,0.2); border-radius: 50%; border-top-color: #A855F7; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .plan-card-glow:hover .plan-title {
+            color: #A855F7;
+            text-shadow: 0 0 15px rgba(168, 85, 247, 0.4); 
+        }
+        
+        main {
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            perspective: 1000px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loader"><div class="spinner"></div></div>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo, memo } = React;
+        const { motion, AnimatePresence, useInView } = window.Motion;
+        const THREE = window.THREE;
+        const { gsap, ScrollTrigger } = window;
+        gsap.registerPlugin(ScrollTrigger);
+
+        // --- LASER FLOW SHADER (OPTIMIZED) ---
+        const VERT = `precision highp float; attribute vec3 position; void main(){ gl_Position = vec4(position, 1.0); }`;
+        const FRAG_LASER = `
+        #ifdef GL_ES
+        #extension GL_OES_standard_derivatives : enable
+        #endif
+        precision mediump float; 
+        uniform float iTime; uniform vec3 iResolution; uniform float uWispDensity; uniform float uFlowTime; uniform float uBeamXFrac; uniform float uBeamYFrac; uniform float uFlowSpeed; uniform float uVLenFactor; uniform float uHLenFactor; uniform float uFogIntensity; uniform float uWSpeed; uniform float uWIntensity; uniform float uFlowStrength; uniform float uDecay; uniform float uFalloffStart; uniform vec3 uColor; uniform float uFade;
+        #define PI 3.14159265359
+        #define TWO_PI 6.28318530718
+        #define EPS 1e-6
+        #define EDGE_SOFT 0.0152
+        #define DT_LOCAL 0.0038
+        #define TAP_RADIUS 2 
+        #define R_H 150.0
+        #define R_V 150.0
+        #define FLARE_HEIGHT 16.0
+        #define FLARE_AMOUNT 8.0
+        #define FLARE_EXP 2.0
+        #define TOP_FADE_START 0.1
+        #define TOP_FADE_EXP 1.0
+        #define FLOW_PERIOD 0.5
+        #define FLOW_SHARPNESS 1.5
+        #define W_BASE_X 1.5
+        #define W_LAYER_GAP 0.25
+        #define W_LANES 5
+        #define W_SIDE_DECAY 0.5
+        #define W_HALF 0.01
+        #define W_AA 0.15
+        #define W_CELL 20.0
+        #define W_SEG_MIN 0.01
+        #define W_SEG_MAX 0.55
+        #define W_CURVE_AMOUNT 15.0
+        #define W_CURVE_RANGE 13.0
+        #define W_BOTTOM_EXP 10.0
+        float g(float x){return x<=0.00031308?12.92*x:1.055*pow(x,1.0/2.4)-0.055;}
+        float bs(vec2 p,vec2 q,float powr){ float d=distance(p,q),f=powr*uFalloffStart,r=(f*f)/(d*d+EPS); return powr*min(1.0,r); }
+        float bsa(vec2 p,vec2 q,float powr,vec2 s){ vec2 d=p-q; float dd=(d.x*d.x)/(s.x*s.x)+(d.y*d.y)/(s.y*s.y),f=powr*uFalloffStart,r=(f*f)/(dd+EPS); return powr*min(1.0,r); }
+        float tri01(float x){float f=fract(x);return 1.0-abs(f*2.0-1.0);}
+        float tauWf(float t,float tmin,float tmax){float a=smoothstep(tmin,tmin+EDGE_SOFT,t),b=1.0-smoothstep(tmax-EDGE_SOFT,tmax,t);return max(0.0,a*b);} 
+        float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+34.123);return fract(p.x*p.y);}
+        float rGate(float x,float l){float a=smoothstep(0.0,W_AA,x),b=1.0-smoothstep(l,l+W_AA,x);return max(0.0,a*b);}
+        float flareY(float y){float t=clamp(1.0-(clamp(y,0.0,FLARE_HEIGHT)/max(FLARE_HEIGHT,EPS)),0.0,1.0);return pow(t,FLARE_EXP);}
+        float vWisps(vec2 uv,float topF){ float y=uv.y,yf=(y+uFlowTime*uWSpeed)/W_CELL; float d=max(uWispDensity,1.0); int lanes=int(max(1.0,floor(float(W_LANES)*min(d,1.0)))); float sum=0.0;
+            float fm=flareY(max(y,0.0)),rm=clamp(1.0-(y/max(W_CURVE_RANGE,EPS)),0.0,1.0),cm=fm*rm; float xS=1.0+(FLARE_AMOUNT*W_CURVE_AMOUNT*0.05)*cm;
+            float bGain=pow(1.0-clamp(y/R_V,0.0,1.0),W_BOTTOM_EXP);
+            for(int s=0;s<2;++s){ float sgn=s==0?-1.0:1.0;
+                for(int i=0;i<W_LANES;++i){ if(i>=lanes) break; float off=W_BASE_X+float(i)*W_LAYER_GAP,xc=sgn*(off*xS); float dx=abs(uv.x-xc),lat=1.0-smoothstep(W_HALF,W_HALF+W_AA,dx),amp=exp(-off*W_SIDE_DECAY);
+                    float seed=h21(vec2(off,sgn*17.0)),yf2=yf+seed*7.0,ci=floor(yf2),fy=fract(yf2); float seg=mix(W_SEG_MIN,W_SEG_MAX,h21(vec2(ci,off*2.3))); float spR=h21(vec2(ci,off+sgn*31.0));
+                    sum+=amp*lat*rGate(fy,seg)*step(spR,min(d,1.0)); } }
+            return uWIntensity*sum*topF*bGain*smoothstep(-3.0,0.0,y)*(1.0-smoothstep(R_V-6.0,R_V,y)); }
+        void mainImage(out vec4 fc,in vec2 frag){
+            vec2 C=iResolution.xy*.5; float sc=512.0/iResolution.x*.4; vec2 uv=(frag-C)*sc,uvc=uv-vec2(uBeamXFrac*iResolution.x*sc,uBeamYFrac*iResolution.y*sc);
+            float a=0.0,b=0.0; float basePhase=1.5*PI+uDecay*.5,tauMin=basePhase-uDecay,tauMax=basePhase;
+            float cx=clamp(uvc.x/(R_H*uHLenFactor),-1.0,1.0),tH=clamp(TWO_PI-acos(cx),tauMin,tauMax);
+            for(int k=-TAP_RADIUS;k<=TAP_RADIUS;++k){ float tu=tH+float(k)*DT_LOCAL,wt=tauWf(tu,tauMin,tauMax); if(wt<=0.0) continue; float spd=max(abs(sin(tu)),0.02),u=clamp((basePhase-tu)/max(uDecay,EPS),0.0,1.0); a+=wt*bs(uvc,vec2((R_H*uHLenFactor)*cos(tu),0.0),pow(1.0-abs(u*2.0-1.0),0.8)*spd); }
+            float yPix=uvc.y,cy=clamp(-yPix/(R_V*uVLenFactor),-1.0,1.0),tV=clamp(TWO_PI-acos(cy),tauMin,tauMax);
+            for(int k=-TAP_RADIUS;k<=TAP_RADIUS;++k){ float tu=tV+float(k)*DT_LOCAL,wt=tauWf(tu,tauMin,tauMax); if(wt<=0.0) continue; float yb=(-R_V)*cos(tu),s=clamp(yb/R_V,0.0,1.0),spd=max(abs(sin(tu)),0.02);
+                float env=pow(1.0-s,0.6)*spd*pow(1.0-smoothstep(TOP_FADE_START,1.0,s),TOP_FADE_EXP); env*=mix(1.0-uFlowStrength,1.0,pow(tri01(s/max(FLOW_PERIOD,EPS)+uFlowTime*uFlowSpeed),FLOW_SHARPNESS));
+                float yp=(-R_V*uVLenFactor)*cos(tu),m=pow(smoothstep(FLARE_HEIGHT,0.0,yp),FLARE_EXP); b+=wt*bsa(uvc,vec2(0.0,yp),step(0.0,yp)*env,vec2(1.0+FLARE_AMOUNT*m,1.0)); }
+            float topA=pow(1.0-smoothstep(TOP_FADE_START,1.0,clamp(yPix/R_V,0.0,1.0)),TOP_FADE_EXP); float L=a+b*topA,w=vWisps(vec2(uvc.x,yPix),topA);
+            vec3 col=g(L+w)*uColor; float alpha=clamp(g(L+w*0.6),0.0,1.0);
+            fc=vec4(col,alpha)*uFade;
+        }
+        void main(){ vec4 fc; mainImage(fc, gl_FragCoord.xy); gl_FragColor = fc; }
+        `;
+
+        // Memoized to prevent re-renders on state change
+        const LaserFlow = memo(({ wispDensity=1, horizontalBeamOffset=0.1, verticalBeamOffset=0.0, flowSpeed=0.35, verticalSizing=2.0, horizontalSizing=0.5, wispSpeed=15.0, wispIntensity=5.0, flowStrength=0.25, decay=1.1, falloffStart=1.2, color='#A855F7' }) => {
+            const mountRef = useRef(null);
+            const hexToRGB = hex => {
+                let c = hex.trim(); if(c[0]==='#') c=c.slice(1);
+                if(c.length===3) c=c.split('').map(x=>x+x).join('');
+                const n=parseInt(c,16)||0xffffff; return {r:((n>>16)&255)/255,g:((n>>8)&255)/255,b:(n&255)/255};
+            };
+
+            useEffect(()=>{
+                if(!mountRef.current) return;
+                const mount = mountRef.current;
+                const renderer = new THREE.WebGLRenderer({ antialias:false, alpha:true, powerPreference:'high-performance' });
+                renderer.setPixelRatio(1); 
+                renderer.setSize(mount.clientWidth, mount.clientHeight);
+                mount.appendChild(renderer.domElement);
+
+                const scene = new THREE.Scene();
+                const camera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1,-1,0, 3,-1,0, -1,3,0]),3));
+                const uniforms = {
+                    iTime:{value:0}, iResolution:{value:new THREE.Vector3(mount.clientWidth,mount.clientHeight,1)},
+                    uWispDensity:{value:wispDensity}, uFlowTime:{value:0},
+                    uBeamXFrac:{value:horizontalBeamOffset}, uBeamYFrac:{value:verticalBeamOffset},
+                    uFlowSpeed:{value:flowSpeed}, uVLenFactor:{value:verticalSizing}, uHLenFactor:{value:horizontalSizing},
+                    uWSpeed:{value:wispSpeed},
+                    uWIntensity:{value:wispIntensity}, uFlowStrength:{value:flowStrength}, uDecay:{value:decay},
+                    uFalloffStart:{value:falloffStart}, uColor:{value:new THREE.Vector3()}, uFade:{value:0}
+                };
+                const material = new THREE.RawShaderMaterial({ vertexShader:VERT, fragmentShader:FRAG_LASER, uniforms, transparent:true, depthTest:false, blending:THREE.AdditiveBlending });
+                const mesh = new THREE.Mesh(geometry, material); scene.add(mesh);
+                const clock = new THREE.Clock(); let raf=0;
+
+                const animate = () => {
+                    raf = requestAnimationFrame(animate);
+                    const dt = clock.getDelta();
+                    uniforms.iTime.value = clock.getElapsedTime();
+                    uniforms.uFlowTime.value += dt;
+                    if(uniforms.uFade.value < 1) uniforms.uFade.value += dt * 0.5;
+                    renderer.render(scene, camera);
+                };
+                animate();
+                const {r,g,b} = hexToRGB(color); uniforms.uColor.value.set(r,g,b);
+                const resize = () => { if(mount){ renderer.setSize(mount.clientWidth, mount.clientHeight); uniforms.iResolution.value.set(mount.clientWidth, mount.clientHeight, 1); } };
+                window.addEventListener('resize', resize);
+                return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); if(renderer && mount) mount.removeChild(renderer.domElement); geometry.dispose(); material.dispose(); renderer.dispose(); };
+            },[]);
+            return <div ref={mountRef} className="laser-flow-container" />;
+        });
+
+        // Memoized to prevent re-renders on inputs
+        const GhostCursor = memo(({ trailLength = 20, inertia = 0.92, bloomStrength = 0.1, bloomRadius = 0.5, bloomThreshold = 0.1, brightness = 0.30, color = '#B19EEF' }) => {
+            const mountRef = useRef(null);
+            const trailBufRef = useRef(Array.from({ length: 30 }, () => new THREE.Vector2(0.5, 0.5)));
+            const headRef = useRef(0);
+            const currentMouseRef = useRef(new THREE.Vector2(0.5, 0.5));
+            const velocityRef = useRef(new THREE.Vector2(0, 0));
+            const fadeOpacityRef = useRef(1.0);
+            const lastMoveTimeRef = useRef(Date.now());
+
+            useEffect(() => {
+                const mount = mountRef.current;
+                const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
+                renderer.setPixelRatio(1);
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setClearColor(0x000000, 0);
+                mount.appendChild(renderer.domElement);
+
+                const scene = new THREE.Scene();
+                const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+                const baseColor = new THREE.Color(color);
+                const fragmentShader = `
+                    uniform float iTime; uniform vec3 iResolution; uniform vec2 iMouse; uniform vec2 iPrevMouse[30]; uniform float iOpacity; uniform vec3 iBaseColor; uniform float iBrightness;
+                    varying vec2 vUv;
+                    float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7))) * 43758.5453123); }
+                    float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f *= f * (3. - 2. * f); return mix(mix(hash(i + vec2(0.,0.)), hash(i + vec2(1.,0.)), f.x), mix(hash(i + vec2(0.,1.)), hash(i + vec2(1.,1.)), f.x), f.y); }
+                    float fbm(vec2 p){ float v = 0.0; float a = 0.5; mat2 m = mat2(0.87, 0.48, -0.48, 0.87); for(int i=0;i<5;i++){ v += a * noise(p); p = m * p * 2.0; a *= 0.5; } return v; }
+                    vec4 blob(vec2 p, vec2 mousePos, float intensity, float activity) { vec2 q = vec2(fbm(p * 2.0 + iTime * 0.2), fbm(p * 2.0 + vec2(5.2,1.3) + iTime * 0.2)); vec2 r = vec2(fbm(p * 2.0 + q * 1.5 + iTime * 0.3), fbm(p * 2.0 + q * 1.5 + vec2(8.3,2.8) + iTime * 0.3)); float smoke = fbm(p * 3.0 + r * 1.0); float d = length(p - mousePos); float distFactor = 1.0 / (1.0 + d * 15.0); float alpha = pow(smoke, 1.5) * distFactor * 2.5; return vec4(iBaseColor * alpha * intensity, alpha * intensity); }
+                    void main() { vec2 uv = vUv; vec2 aspect = vec2(iResolution.x / iResolution.y, 1.0); vec2 p = (uv * 2.0 - 1.0) * aspect; vec2 mouse = (iMouse * 2.0 - 1.0) * aspect; vec3 colorAcc = vec3(0.0); float alphaAcc = 0.0; vec4 b = blob(p, mouse, 1.0, iOpacity); colorAcc += b.rgb; alphaAcc += b.a; for (int i = 0; i < 30; i++) { vec2 pm = (iPrevMouse[i] * 2.0 - 1.0) * aspect; float t = 1.0 - float(i) / 30.0; t = pow(t, 2.0); if (t > 0.01) { vec4 bt = blob(p, pm, t * 0.5, iOpacity); colorAcc += bt.rgb; alphaAcc += bt.a; } } gl_FragColor = vec4(colorAcc * iBrightness, alphaAcc * iOpacity); }
+                `;
+                const material = new THREE.ShaderMaterial({
+                    uniforms: { iTime: { value: 0 }, iResolution: { value: new THREE.Vector3(window.innerWidth, window.innerHeight, 1) }, iMouse: { value: new THREE.Vector2(0.5, 0.5) }, iPrevMouse: { value: trailBufRef.current }, iOpacity: { value: 1.0 }, iBaseColor: { value: baseColor }, iBrightness: { value: brightness } },
+                    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`,
+                    fragmentShader: fragmentShader, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending
+                });
+                const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material); scene.add(plane);
+
+                const composer = new THREE.EffectComposer(renderer);
+                composer.addPass(new THREE.RenderPass(scene, camera));
+                composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), bloomStrength, bloomRadius, bloomThreshold));
+                
+                const onMove = (e) => { currentMouseRef.current.set(e.clientX/window.innerWidth, 1.0-(e.clientY/window.innerHeight)); lastMoveTimeRef.current = performance.now(); fadeOpacityRef.current = 1.0; };
+                window.addEventListener('mousemove', onMove);
+                const onResize = () => { renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); material.uniforms.iResolution.value.set(window.innerWidth, window.innerHeight, 1); };
+                window.addEventListener('resize', onResize);
+                
+                const clock = new THREE.Clock(); let raf;
+                const animate = () => {
+                    raf = requestAnimationFrame(animate);
+                    const time = clock.getElapsedTime();
+                    const target = currentMouseRef.current, current = material.uniforms.iMouse.value;
+                    velocityRef.current.set(target.x - current.x, target.y - current.y).multiplyScalar(1 - inertia);
+                    current.add(velocityRef.current);
+                    
+                    headRef.current = (headRef.current + 1) % 30;
+                    trailBufRef.current[headRef.current].copy(current);
+                    const arr = material.uniforms.iPrevMouse.value;
+                    for(let i=0; i<30; i++) { arr[i].copy(trailBufRef.current[(headRef.current - i + 30) % 30]); }
+
+                    if(performance.now() - lastMoveTimeRef.current > 1000) fadeOpacityRef.current = Math.max(0, fadeOpacityRef.current - 0.02);
+                    material.uniforms.iTime.value = time; material.uniforms.iOpacity.value = fadeOpacityRef.current;
+                    composer.render();
+                };
+                animate();
+                return () => { cancelAnimationFrame(raf); window.removeEventListener('mousemove', onMove); window.removeEventListener('resize', onResize); mount.removeChild(renderer.domElement); };
+            }, [color]);
+            return <div ref={mountRef} className="ghost-cursor-container" />;
+        });
+
+        const ScrollFloat = ({ children, scrollContainerRef }) => {
+            const containerRef = useRef(null);
+            const splitText = children.split('').map((char, index) => (<span className="char" key={index}>{char === ' ' ? '\u00A0' : char}</span>));
+            useEffect(() => {
+                if (!containerRef.current) return;
+                gsap.fromTo(containerRef.current.querySelectorAll('.char'), { opacity: 0, yPercent: 120, scaleY: 2.3 }, { duration: 1.5, ease: 'power2.out', opacity: 1, yPercent: 0, scaleY: 1, stagger: 0.05, scrollTrigger: { trigger: containerRef.current, start: 'center bottom+=50%', end: 'bottom bottom', scrub: 2.5 } });
+            }, []);
+            return <h2 ref={containerRef} className="scroll-float"><span className="scroll-float-text">{splitText}</span></h2>;
+        };
+
+        function DemoChat() { 
+            const [msgs, setMsgs] = useState([]); 
+            useEffect(() => { 
+                const raw = [{from:'user',text:'Hi, how does Vyrox work?'},{from:'bot',text:'Vyrox automates WhatsApp replies.'},{from:'user',text:'Can I get a demo?'},{from:'bot',text:'Sure — pick a time.'}]; 
+                let i = 0; 
+                const interval = setInterval(() => { if (i >= raw.length) { clearInterval(interval); return; } const nextMsg = raw[i]; if (nextMsg) { setMsgs(p => [...p, nextMsg]); } i++; }, 1500); 
+                return () => clearInterval(interval); 
+            }, []); 
+            return ( 
+                <div className="w-full max-w-md bg-neutral-900/40 backdrop-blur-xl rounded-2xl border border-white/10 p-4 shadow-xl h-[300px] flex flex-col relative group">
+                    <div className="flex-1 overflow-auto flex flex-col gap-3">
+                        {msgs.map((m, i) => { if (!m) return null; return (<motion.div key={i} initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} className={`p-3 rounded-xl max-w-[85%] text-xs ${m.from==='bot'?'bg-neutral-800/80 text-gray-200 rounded-tl-sm border border-white/5':'bg-[#A855F7] text-black font-bold self-end rounded-tr-sm'}`}>{m.text}</motion.div>); })}
+                    </div>
+                </div> 
+            ); 
+        }
+
+        function PlanRecommender({ onPlanSelected }) { 
+            const [step, setStep] = useState(1);
+            const [data, setData] = useState({ name: '', type: 'Physical Store', count: '' });
+            const [res, setRes] = useState(null);
+            const [error, setError] = useState(false);
+
+            const analyze = () => {
+                // Validation: Check if fields are empty
+                if(!data.name.trim() || !data.count.trim()) {
+                    setError(true);
+                    return;
+                }
+                
+                setError(false);
+                let recommended = 'Standard';
+                let reason = '';
+                const count = parseInt(data.count);
+
+                if (count > 2000) {
+                    recommended = 'Premium';
+                    reason = `With ${count} daily messages, you need our dedicated servers and unlimited agents.`;
+                } else if (data.type === 'E-Commerce' || (count >= 500 && count <= 2000)) {
+                    recommended = 'Standard';
+                    reason = data.type === 'E-Commerce' ? 'E-Commerce requires our advanced API integrations.' : 'Perfect for scaling businesses.';
+                } else {
+                    recommended = 'Basic';
+                    reason = 'Ideal for physical stores starting with automation.';
+                }
+                setRes({ id: recommended, r: reason });
+            };
+
+            return ( 
+                <div className="bg-neutral-900/30 backdrop-blur-md rounded-2xl border border-white/10 p-6 max-w-lg mx-auto w-full relative z-20">
+                    <h4 className="text-xl font-bold mb-4 text-white text-center">AI Plan Finder</h4>
+                    
+                    {!res ? (
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-gray-400 mb-1 block">Shop / Business Name</label>
+                                <input 
+                                    value={data.name} 
+                                    onChange={e=>setData({...data, name: e.target.value})} 
+                                    placeholder="Ex: Vyrox Retail" 
+                                    className={`w-full p-3 rounded-lg bg-black/40 border text-white text-sm focus:border-[#A855F7] outline-none transition-colors focus:bg-white/5 ${error && !data.name ? 'border-red-500' : 'border-neutral-700'}`} 
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-gray-400 mb-1 block">Business Type</label>
+                                    <select value={data.type} onChange={e=>setData({...data, type: e.target.value})} className="w-full p-3 rounded-lg bg-black/40 border border-neutral-700 text-white text-sm focus:border-[#A855F7] outline-none transition-colors focus:bg-white/5 appearance-none">
+                                        <option>Physical Store</option>
+                                        <option>E-Commerce</option>
+                                        <option>Service Agency</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-400 mb-1 block">Msgs / Day</label>
+                                    <input 
+                                        type="number" 
+                                        value={data.count} 
+                                        onChange={e=>setData({...data, count: e.target.value})} 
+                                        placeholder="500" 
+                                        className={`w-full p-3 rounded-lg bg-black/40 border text-white text-sm focus:border-[#A855F7] outline-none transition-colors focus:bg-white/5 ${error && !data.count ? 'border-red-500' : 'border-neutral-700'}`} 
+                                    />
+                                </div>
+                            </div>
+
+                            <button onClick={analyze} className="w-full py-3 bg-[#A855F7] hover:bg-[#9333ea] transition-colors text-black font-bold rounded-lg text-sm mt-2">Analyze Requirements</button>
+                        </div>
+                    ) : (
+                        <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} className="text-center">
+                            <div className="text-sm text-gray-400 mb-2">Based on your input for <span className="text-white font-bold">{data.name}</span>:</div>
+                            <div className="p-4 bg-[#A855F7]/10 border border-[#A855F7]/30 rounded-lg mb-4">
+                                <div className="text-2xl font-bold text-white mb-1">{res.id} Plan</div>
+                                <div className="text-xs text-[#A855F7]">{res.r}</div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={()=>setRes(null)} className="flex-1 py-2 text-xs text-gray-400 hover:text-white">Back</button>
+                                {/* Opens the Checkout Modal instead of showing immediate success */}
+                                <button onClick={() => onPlanSelected(res.id)} className="flex-[2] py-2 bg-white text-black font-bold rounded-lg text-sm hover:bg-gray-200">Get Demo for {res.id}</button>
+                            </div>
+                        </motion.div>
+                    )}
+                </div> 
+            ); 
+        }
+        
+        function FAQItem({ q, a }) { const [open, setOpen] = useState(false); return ( <div onClick={()=>setOpen(!open)} className="bg-neutral-900/30 border border-white/5 p-4 rounded-xl cursor-pointer hover:border-[#A855F7]/30 hover:bg-neutral-900/60 transition-all group"> <div className="flex justify-between items-center text-sm font-semibold text-gray-200 group-hover:text-[#A855F7] transition-colors">{q} <span className={`text-[#A855F7] transition-transform ${open?'rotate-180':''}`}>▼</span></div> <AnimatePresence>{open && <motion.div initial={{height:0, opacity:0}} animate={{height:'auto', opacity:1}} exit={{height:0, opacity:0}} className="overflow-hidden"><div className="pt-2 text-xs text-gray-400 leading-relaxed">{a}</div></motion.div>}</AnimatePresence> </div> ); }
+
+        const plans = [
+            {
+                name:'Basic',
+                price:499,
+                features:['Auto replies','Lead capture','1 Agent'],
+                allFeatures: ['Auto replies', 'Lead capture', '1 Agent', 'Basic Templates', 'Standard Support', '500 Messages/day limit']
+            },
+            {
+                name:'Standard',
+                price:899,
+                features:['Multi-step flows','Agent handoff','5 Agents', 'Appointment Booking'],
+                allFeatures: ['Multi-step flows', 'Agent handoff', '5 Agents', 'Appointment Booking', 'Advanced Templates', 'Priority Support', 'Green Tick Assistance', 'Unlimited Messages', 'Analytics Dashboard']
+            },
+            {
+                name:'Premium',
+                price:1499,
+                features:['Dedicated Manager','API Access','Unlimited Agents', 'Appointment Booking'],
+                allFeatures: ['Dedicated Manager', 'API Access', 'Unlimited Agents', 'Appointment Booking', 'Custom AI Model', '24/7 Phone Support', 'SLA Guarantee', 'On-premise Deployment', 'White-labeling']
+            }
+        ];
+        
+        function ComparisonTable() {
+            const features = [
+                { name: "24/7 AI Auto-Reply", b: true, s: true, p: true },
+                { name: "Green Tick Verification", b: false, s: true, p: true },
+                { name: "Broadcast Campaigns", b: false, s: true, p: true },
+                { name: "Smart Routing", b: false, s: true, p: true },
+                { name: "CRM Integration", b: false, s: "Basic", p: "Advanced" },
+                { name: "Appointment Booking", b: false, s: true, p: true }, // ADDED THIS ROW
+                { name: "Analytics Dashboard", b: "Basic", s: "Advanced", p: "Real-time" },
+                { name: "Multi-Agent Support", b: "1 Seat", s: "5 Seats", p: "Unlimited" },
+                { name: "API Access", b: false, s: false, p: true },
+                { name: "Dedicated Account Manager", b: false, s: false, p: true },
+                { name: "Custom AI Model Training", b: false, s: false, p: true },
+                { name: "SLA Guarantee", b: false, s: false, p: true },
+            ];
+            
+            return (
+                <div className="w-full overflow-x-auto bg-[#0a0a0a] rounded-3xl border border-white/10 p-6">
+                    <h3 className="text-2xl font-bold mb-6 text-center">Feature Comparison</h3>
+                    <table className="w-full text-left border-collapse min-w-[700px]">
+                        <thead>
+                            <tr className="border-b border-white/10 text-gray-400 text-xs uppercase tracking-wider">
+                                <th className="p-4 font-medium">Feature</th>
+                                <th className="p-4 text-center font-medium">Basic</th>
+                                <th className="p-4 text-center text-[#A855F7] font-bold">Standard</th>
+                                <th className="p-4 text-center font-medium">Premium</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-sm">
+                            {features.map((f, i) => (
+                                <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                    <td className="p-4 font-medium text-white">{f.name}</td>
+                                    <td className="p-4 text-center text-gray-400">{f.b === true ? "✓" : f.b === false ? "-" : f.b}</td>
+                                    <td className="p-4 text-center text-[#A855F7] font-bold">{f.s === true ? "✓" : f.s === false ? "-" : f.s}</td>
+                                    <td className="p-4 text-center text-white">{f.p === true ? "✓" : f.p === false ? "-" : f.p}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        }
+
+        function ScrollReveal({ children, direction = "up", delay = 0 }) { 
+            const ref = useRef(null); 
+            const isInView = useInView(ref, { once: false, margin: "-10% 0px" }); 
+            let initial = { opacity: 0, x: 0, y: 0 }; 
+            
+            if (direction === "left") initial.x = -150; 
+            else if (direction === "right") initial.x = 150; 
+            else if (direction === "up") initial.y = 100;
+            else if (direction === "down") initial.y = -100;
+
+            return ( 
+                <motion.div 
+                    ref={ref} 
+                    initial={initial} 
+                    animate={isInView ? { opacity: 1, x: 0, y: 0 } : initial} 
+                    transition={{ duration: 1.6, delay, ease: [0.19, 1.0, 0.22, 1.0] }}
+                    className="w-full"
+                    style={{ willChange: 'transform, opacity' }}
+                > 
+                    {children} 
+                </motion.div> 
+            ); 
+        }
+
+        function SuccessModal({ onClose }) {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 4000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            return (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md px-4">
+                    <motion.div 
+                        initial={{scale: 0.8, opacity: 0}} 
+                        animate={{scale: 1, opacity: 1}} 
+                        exit={{scale: 0.8, opacity: 0}} 
+                        className="bg-black border border-green-500/50 p-8 rounded-3xl max-w-sm w-full text-center shadow-[0_0_50px_rgba(34,197,94,0.2)]"
+                    >
+                        <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/30">
+                            <span className="text-2xl text-green-500">✓</span>
+                        </div>
+                        <h2 className="text-2xl font-bold mb-2 text-white">Successfully Sent!</h2>
+                        <p className="text-gray-400 text-sm">We have received your request. Our team will contact you shortly.</p>
+                        <button onClick={onClose} className="mt-6 px-6 py-2 bg-neutral-800 hover:bg-neutral-700 rounded-full text-xs font-bold text-white transition-colors">Close</button>
+                    </motion.div>
+                </div>
+            );
+        }
+
+        function CheckoutModal({ plan, onClose, onSuccess }) {
+            const [form, setForm] = useState({ name: '', email: '', phone: '' });
+            const [errors, setErrors] = useState({});
+            const [isSubmitting, setIsSubmitting] = useState(false);
+
+           const handleSubmit = async () => {
+  const newErrors = {};
+  if (!form.name.trim()) newErrors.name = true;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) newErrors.email = true;
+  if (!/^\+?[\d\s-]{10,}$/.test(form.phone)) newErrors.phone = true;
+
+  setErrors(newErrors);
+
+  if (Object.keys(newErrors).length !== 0) return;
+
+  setIsSubmitting(true);
+
+  try {
+    // ✅ 1️⃣ Save Lead
+    await window.saveLeadToFirebase({
+      requestType: "checkout_plan",
+      plan: plan,
+      ...form
+    });
+
+    // ✅ 2️⃣ Create Client
+    if (window.createClientInFirestore) {
+      await window.createClientInFirestore({
+        companyName: form.name,
+        email: form.email,
+        phone: form.phone,
+        selectedPlan: plan,
+        businessType: "NOT_SET_YET",
+        status: "active"
+      });
+    }
+
+    // ✅ 3️⃣ FORCE SUCCESS UI
+    setIsSubmitting(false);
+    onSuccess(); // ✅ THIS WAS WHAT WAS MISSING IN FLOW
+
+  } catch (err) {
+    console.error("FINAL CHECKOUT ERROR:", err);
+    alert("Something went wrong. Try again.");
+    setIsSubmitting(false);
+  }
+};
+
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={onClose}>
+                    <motion.div initial={{scale:0.9,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:0.9,opacity:0}} onClick={e=>e.stopPropagation()} className="bg-[#0a0a0a] border border-[#A855F7]/30 p-8 rounded-3xl max-w-sm w-full shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#A855F7] to-transparent"></div>
+                        <h2 className="text-2xl font-bold mb-2 text-white">Selected: {plan}</h2>
+                        <p className="text-gray-400 text-sm mb-6">Complete your details to proceed with the {plan} tier.</p>
+                        
+                        <div className="space-y-3 mb-6">
+                            <input 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none ${errors.name ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="Full Name" 
+                                value={form.name}
+                                onChange={e => setForm({...form, name: e.target.value})}
+                            />
+                            <input 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none ${errors.email ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="Email Address" 
+                                value={form.email}
+                                onChange={e => setForm({...form, email: e.target.value})}
+                            />
+                            <input 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none ${errors.phone ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="Phone Number" 
+                                value={form.phone}
+                                onChange={e => setForm({...form, phone: e.target.value})}
+                            />
+                        </div>
+
+                        <button onClick={handleSubmit} disabled={isSubmitting} className="w-full py-3 rounded-xl bg-[#A855F7] text-white font-bold text-sm shadow-lg hover:shadow-[#A855F7]/20 transition-all">
+                            {isSubmitting ? 'Processing...' : 'Proceed to Checkout'}
+                        </button>
+                    </motion.div>
+                </div>
+            );
+        }
+
+        function ContactModal({ onClose, onSuccess }) {
+             const [form, setForm] = useState({ company: '', email: '', phone: '', message: '' });
+             const [errors, setErrors] = useState({});
+             const [isSubmitting, setIsSubmitting] = useState(false);
+
+             const handleSubmit = async () => {
+                const newErrors = {};
+                if (!form.company.trim()) newErrors.company = true;
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) newErrors.email = true;
+                if (!/^\+?[\d\s-]{10,}$/.test(form.phone)) newErrors.phone = true;
+                if (!form.message.trim()) newErrors.message = true;
+
+                setErrors(newErrors);
+                if (Object.keys(newErrors).length === 0) {
+                    setIsSubmitting(true);
+                    
+                    // CALLING THE FIREBASE FUNCTION
+                    if (window.saveLeadToFirebase) {
+                        await window.saveLeadToFirebase({
+                            requestType: "contact_sales",
+                            ...form
+                        });
+                    } else {
+                        console.error("Firebase function not found");
+                    }
+
+                    setIsSubmitting(false);
+                    onSuccess();
+                }
+             };
+             
+             return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={onClose}>
+                    <motion.div initial={{y:50,opacity:0}} animate={{y:0,opacity:1}} exit={{y:50,opacity:0}} onClick={e=>e.stopPropagation()} className="bg-[#0a0a0a] border border-white/10 p-8 rounded-3xl max-w-md w-full shadow-2xl">
+                        <h2 className="text-2xl font-bold mb-4 text-white">Contact Sales</h2>
+                        <div className="space-y-4">
+                            <input 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none ${errors.company ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="Company Name"
+                                value={form.company}
+                                onChange={e=>setForm({...form, company: e.target.value})}
+                            />
+                            <input 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none ${errors.email ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="Work Email"
+                                value={form.email}
+                                onChange={e=>setForm({...form, email: e.target.value})}
+                            />
+                            <input 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none ${errors.phone ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="Phone Number"
+                                value={form.phone}
+                                onChange={e=>setForm({...form, phone: e.target.value})}
+                            />
+                            <textarea 
+                                className={`w-full bg-white/5 border rounded-lg p-3 text-sm text-white focus:border-[#A855F7] outline-none h-24 ${errors.message ? 'border-red-500' : 'border-white/10'}`} 
+                                placeholder="How can we help?"
+                                value={form.message}
+                                onChange={e=>setForm({...form, message: e.target.value})}
+                            ></textarea>
+                            <button onClick={handleSubmit} disabled={isSubmitting} className="w-full py-3 rounded-xl bg-white text-black font-bold text-sm hover:bg-gray-200 transition-all">
+                                {isSubmitting ? 'Sending...' : 'Send Message'}
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+             );
+        }
+
+        function App() {
+            const chatSectionRef = useRef(null);
+            const [explored, setExplored] = useState(false);
+            const [showModal, setShowModal] = useState(null);
+            const [contactModal, setContactModal] = useState(false);
+            const [viewDetailsPlan, setViewDetailsPlan] = useState(null);
+            const [successModal, setSuccessModal] = useState(false);
+
+            // Handler for successful submissions
+            const handleSuccess = () => {
+                setShowModal(null);
+                setContactModal(false);
+                setViewDetailsPlan(null);
+                setSuccessModal(true);
+            };
+
+            useEffect(() => {
+                if (!window.Lenis) return; 
+
+                const lenis = new window.Lenis({
+                    duration: 1.2,
+                    easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+                    orientation: 'vertical',
+                    gestureOrientation: 'vertical',
+                    smoothWheel: true,
+                    wheelMultiplier: 1,
+                    touchMultiplier: 2,
+                });
+
+                lenis.on('scroll', ScrollTrigger.update);
+                gsap.ticker.add((time) => { lenis.raf(time * 1000); });
+                gsap.ticker.lagSmoothing(0);
+
+                return () => {
+                    lenis.destroy();
+                    gsap.ticker.remove(lenis.raf);
+                };
+            }, []);
+
+            useEffect(() => {
+                const loader = document.getElementById('loader');
+                if(loader) setTimeout(() => { loader.style.opacity = '0'; }, 1000);
+                setTimeout(() => { if(loader) loader.remove(); }, 1800);
+            }, []);
+
+            useEffect(() => { 
+                if (!explored) document.body.style.overflow = 'hidden'; 
+                else document.body.style.overflow = 'auto'; 
+            }, [explored]);
+
+            const handleExplore = () => {
+                setExplored(true);
+                setTimeout(() => { if (chatSectionRef.current) chatSectionRef.current.scrollIntoView({ behavior: 'smooth' }); }, 100);
+            };
+
+            return (
+                <div className="min-h-screen bg-[#020202] text-white font-sans selection:bg-[#A855F7]/30">
+                    <GhostCursor brightness={0.3} />
+                    
+                    {/* HERO */}
+                    <section className="relative w-full h-screen flex flex-col items-center justify-center overflow-hidden">
+                        <div className="absolute inset-0 w-full h-full z-0 opacity-100">
+                            <LaserFlow color="#A855F7" flowSpeed={0.3} wispDensity={5.0} wispIntensity={25.0} verticalSizing={20.0} horizontalBeamOffset={0.305} verticalBeamOffset={0.00} />
+                        </div>
+                        <div className="relative z-10 text-center flex flex-col items-center px-4 mt-16">
+                            
+                            <motion.div initial={{opacity: 0}} animate={{opacity: 1}} transition={{delay: 2.0, duration: 2, ease: "easeOut"}} className="mb-4 select-none flex flex-row items-center leading-none justify-center">
+                                <span className="text-white text-[10vw] md:text-[120px] font-black tracking-tighter drop-shadow-2xl">VYRO</span>
+                                <span className="text-[#A855F7] text-[12vw] md:text-[140px] font-black leading-none ml-1">X</span>
+                            </motion.div>
+
+                            <motion.div initial={{x: -100, opacity: 0}} animate={{x: 0, opacity: 1}} transition={{delay: 2.2, duration: 1.5, ease: [0.25, 0.1, 0.25, 1]}} className="px-8 py-3 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 text-xs tracking-widest uppercase mb-8 flex items-center gap-3 shadow-2xl">
+                                <span className="w-8 h-[1px] bg-white/30"></span>Whatsapp Automation<span className="w-8 h-[1px] bg-white/30"></span>
+                            </motion.div>
+
+                            <motion.button initial={{x: 100, opacity: 0}} animate={{x: 0, opacity: 1}} transition={{delay: 2.4, duration: 1.5, ease: [0.25, 0.1, 0.25, 1]}} onClick={handleExplore} className="px-8 py-3 bg-white/10 backdrop-blur-xl border border-white/20 text-white hover:bg-[#A855F7] hover:text-black font-bold text-sm rounded-full shadow-lg transition-all duration-500 hover:scale-105">
+                                Explore Services
+                            </motion.button>
+                        </div>
+                    </section>
+
+                    {/* CONTENT */}
+                    {explored && (
+                        <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.8, ease: [0.22, 1, 0.36, 1] }} className="relative z-10 bg-[#020202] min-h-screen pt-20 px-6 border-t border-white/5 shadow-[0_-50px_100px_rgba(0,0,0,1)]">
+                            <div className="max-w-5xl mx-auto space-y-32">
+                                
+                                <div ref={chatSectionRef} className="grid md:grid-cols-2 gap-12 items-center">
+                                    <ScrollReveal direction="left">
+                                        <h2 className="text-4xl md:text-5xl font-bold mb-6">Automate your <span className="text-[#A855F7]">Conversations</span></h2>
+                                        <p className="text-gray-400 text-lg leading-relaxed mb-8 font-light">Engage customers instantly, 24/7. Our AI agents handle inquiries, qualify leads, and book meetings directly on WhatsApp without human intervention.</p>
+                                        <div className="flex gap-4">{['Instant Reply', 'Lead Qual', 'Auto Booking'].map(t=><span key={t} className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-gray-300">{t}</span>)}</div>
+                                    </ScrollReveal>
+                                    <ScrollReveal direction="right"><div className="glow-visible rounded-3xl overflow-hidden border border-white/10"><DemoChat /></div></ScrollReveal>
+                                </div>
+
+                                <ScrollReveal direction="right">
+                                    {/* Pass the plan name to the modal handler */}
+                                    <PlanRecommender onPlanSelected={(planName) => setShowModal(planName)} />
+                                </ScrollReveal>
+
+                                <ScrollReveal direction="left">
+                                    <div className="relative">
+                                        <div className="absolute -inset-10 bg-[#A855F7]/10 blur-[100px] rounded-full pointer-events-none"></div>
+                                        <h2 className="text-4xl font-bold text-center mb-4 relative z-10">Plans & Pricing</h2>
+                                        <p className="text-center text-gray-400 mb-12 max-w-lg mx-auto relative z-10">Choose the automation scale that fits your business needs.</p>
+                                        <div className="grid md:grid-cols-3 gap-6 relative z-10">
+                                            {plans.map((p,i)=>(
+                                                <div key={i} className="plan-card-glow p-8 rounded-[24px] bg-[#0a0a0a] border border-white/10 cursor-pointer relative overflow-hidden group">
+                                                    <div className="absolute top-0 right-0 w-20 h-20 bg-[#A855F7]/10 blur-xl rounded-full -mr-10 -mt-10 transition-all group-hover:bg-[#A855F7]/20"></div>
+                                                    <h3 className="plan-title text-xl font-bold mb-2 text-white transition-all duration-300">{p.name}</h3>
+                                                    
+                                                    {/* DISCOUNT BADGE */}
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="text-gray-500 line-through text-sm">₹{p.price * 2}</span>
+                                                        <span className="bg-[#A855F7]/20 text-[#A855F7] text-[10px] px-2 py-0.5 rounded-full font-bold">50% OFF</span>
+                                                    </div>
+
+                                                    <div className="flex items-baseline gap-1 mb-6"><span className="text-3xl font-bold text-white">₹{p.price}</span><span className="text-gray-500 text-xs">/mo</span></div>
+                                                    <div className="h-[1px] w-full bg-white/5 mb-6"></div>
+                                                    <ul className="space-y-4 mb-8">
+                                                        {p.features.map(f=><li key={f} className="text-gray-300 text-sm flex gap-3 items-center"><span className="text-[#A855F7] bg-[#A855F7]/10 w-5 h-5 rounded-full flex items-center justify-center text-[10px]">✓</span> {f}</li>)}
+                                                    </ul>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={(e)=>{e.stopPropagation(); setViewDetailsPlan(p)}} className="flex-1 py-3 rounded-xl border border-white/20 text-white font-bold text-sm hover:border-[#A855F7] hover:text-[#A855F7] transition-all duration-300">View Details</button>
+                                                        <button onClick={()=>setShowModal(p.name)} className="flex-1 py-3 rounded-xl bg-white text-black font-bold text-sm hover:bg-[#A855F7] hover:text-white transition-all duration-300 shadow-lg">Get Started</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </ScrollReveal>
+
+                                <ScrollReveal direction="right">
+                                    <ComparisonTable />
+                                </ScrollReveal>
+
+                                <ScrollReveal direction="left">
+                                    <div className="max-w-3xl mx-auto">
+                                        <h2 className="text-3xl font-bold mb-8 text-center">FAQ</h2>
+                                        <div className="space-y-4">
+                                            <FAQItem q="How fast is the setup?" a="Most clients are live within 24-48 hours after linking their WhatsApp Business API account." />
+                                            <FAQItem q="Can I scale indefinitely?" a="Yes, our infrastructure is built on cloud-native architecture supporting unlimited concurrent conversations." />
+                                            <FAQItem q="Is it Meta approved?" a="100% compliant. We use official WhatsApp Business APIs to ensure zero risk of banning." />
+                                            <FAQItem q="Do I need coding skills?" a="No, our platform is designed with a no-code drag-and-drop interface." />
+                                            <FAQItem q="Is my data secure?" a="Absolutely. We use end-to-end encryption and are GDPR compliant." />
+                                        </div>
+                                    </div>
+                                </ScrollReveal>
+                            </div>
+                            
+                            <footer className="py-24 text-center border-t border-white/5 mt-32 relative overflow-hidden bg-black flex flex-col items-center justify-center">
+                                <ScrollReveal direction="up">
+                                    <div className="relative z-10 mb-8 select-none"><ScrollFloat>VYROX</ScrollFloat></div>
+                                </ScrollReveal>
+                                <div className="relative z-10 flex gap-6 mb-16 overflow-hidden p-4">
+                                    <motion.button initial={{x: 50, opacity: 0}} whileInView={{x: 0, opacity: 1}} viewport={{once: false}} transition={{duration: 1.2, ease: "easeOut"}} onClick={()=>setShowModal('Enterprise')} className="px-8 py-3 rounded-full bg-[#A855F7] text-black font-bold hover:bg-[#9333ea] transition-all shadow-lg hover:scale-105">
+                                            Book Demo
+                                    </motion.button>
+                                    <motion.button 
+                                        initial={{x: -50, opacity: 0}} 
+                                        whileInView={{x: 0, opacity: 1}} 
+                                        viewport={{once: false}} 
+                                        transition={{duration: 1.2, ease: "easeOut"}} 
+                                        onClick={() => window.location.href = 'mailto:vyrox.saas@gmail.com'}
+                                        className="px-8 py-3 rounded-full border border-white/20 hover:border-white text-gray-300 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                                    >
+                                            Contact Sales
+                                    </motion.button>
+                                </div>
+                                <div className="flex gap-8 text-gray-500 text-xs uppercase tracking-wider relative z-10 mb-8">
+                                    <a href="#" className="hover:text-[#A855F7] transition-colors">Privacy Policy</a>
+                                    <a href="#" className="hover:text-[#A855F7] transition-colors">Terms & Conditions</a>
+                                    <a href="#" className="hover:text-[#A855F7] transition-colors">Copyright</a>
+                                </div>
+                                <div className="absolute right-0 top-0 w-full h-full z-0 opacity-20 pointer-events-none"><LaserFlow color="#A855F7" flowSpeed={0.2} wispDensity={2.0} verticalSizing={4.0} horizontalBeamOffset={0.305} verticalBeamOffset={0.00} /></div>
+                            </footer>
+                        </motion.main>
+                    )}
+
+                    {/* Modals */}
+                    <AnimatePresence>
+                        {/* Success Modal */}
+                        {successModal && <SuccessModal onClose={()=>setSuccessModal(false)} />}
+                        
+                        {/* Checkout Modal */}
+                        {showModal && (
+                            <CheckoutModal plan={showModal} onClose={()=>setShowModal(null)} onSuccess={handleSuccess} />
+                        )}
+                        {/* Contact Modal */}
+                        {contactModal && (
+                            <ContactModal onClose={()=>setContactModal(false)} onSuccess={handleSuccess} />
+                        )}
+                        {/* View Details Modal */}
+                        {viewDetailsPlan && (
+                            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={()=>setViewDetailsPlan(null)}>
+                                <motion.div initial={{scale:0.9,opacity:0}} animate={{scale:1,opacity:1}} exit={{scale:0.9,opacity:0}} onClick={e=>e.stopPropagation()} className="bg-[#0a0a0a] border border-[#A855F7]/30 p-8 rounded-3xl max-w-md w-full shadow-2xl relative overflow-hidden">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h2 className="text-2xl font-bold text-white">{viewDetailsPlan.name} Features</h2>
+                                        <button onClick={()=>setViewDetailsPlan(null)} className="text-gray-400 hover:text-white">✕</button>
+                                    </div>
+                                    <ul className="space-y-3 mb-8">
+                                        {viewDetailsPlan.allFeatures.map((feature, idx) => (
+                                            <li key={idx} className="flex gap-3 text-sm text-gray-300">
+                                                <span className="text-[#A855F7]">✓</span> {feature}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <button onClick={()=>{setViewDetailsPlan(null); setShowModal(viewDetailsPlan.name)}} className="w-full py-3 rounded-xl bg-[#A855F7] text-white font-bold text-sm shadow-lg hover:shadow-[#A855F7]/20 transition-all">Get Started with {viewDetailsPlan.name}</button>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
