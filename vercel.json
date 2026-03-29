@@ -1,5 +1,5 @@
 {
   "routes": [
-    { "src": "/", "dest": "/VYROX-AUTOMATION.html" }
+    { "src": "/", "dest": "/VYROX-Automation.html" }
   ]
 }
